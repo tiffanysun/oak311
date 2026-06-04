@@ -390,14 +390,108 @@
   }
   .key-icon { font-size: 16px; width: 20px; text-align: center; }
 
+  /* Narrative overlay card */
+  .narrative-card {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 1000;
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-radius: 14px;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.12);
+    padding: 20px;
+    width: 300px;
+    max-width: calc(100vw - 350px);
+    display: none;
+    transition: all 0.3s;
+  }
+  .narrative-card.visible { display: block; }
+  .narrative-card.collapsed { padding: 10px 16px; }
+  .narrative-card .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .narrative-card .card-header h3 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+  .narrative-card .collapse-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(118,118,128,0.12);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #86868b;
+  }
+  .narrative-card .narrative-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #1d1d1f;
+  }
+  .narrative-card .narrative-text .hover-detail {
+    position: relative;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+  .narrative-card .narrative-text .hover-detail .tooltip {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1d1d1f;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    margin-bottom: 6px;
+    z-index: 10;
+  }
+  .narrative-card .narrative-text .hover-detail:hover .tooltip { display: block; }
+  .narrative-card .narrative-updated {
+    font-size: 11px;
+    color: #86868b;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .narrative-card.collapsed .card-body { display: none; }
+
   @media (max-width: 600px) {
     .panel { width: calc(100% - 32px); }
+    .narrative-card { right: 16px; left: 16px; width: auto; max-width: none; top: auto; bottom: 16px; }
   }
 </style>
 </head>
 <body>
 
 <div id="map"></div>
+
+<div class="narrative-card" id="narrativeCard">
+  <div class="card-header">
+    <h3>Summary</h3>
+    <button class="collapse-btn" onclick="toggleNarrative()">—</button>
+  </div>
+  <div class="card-body">
+    <div class="narrative-text" id="narrativeText"></div>
+    <div class="narrative-updated" id="narrativeCaveat" style="margin-top:12px;padding-top:12px"></div>
+    <div class="narrative-updated" id="narrativeUpdated" style="margin-top:4px;border-top:none;padding-top:0"></div>
+  </div>
+</div>
 
 <div class="loading-overlay" id="loading">
   <div class="spinner"></div>
@@ -591,6 +685,7 @@ async function fetchData() {
     populateCategories();
     updateStats();
     applyFilters();
+    generateSummary();
     document.getElementById('loading').classList.add('hidden');
 
   } catch (err) {
@@ -921,6 +1016,62 @@ function updateOpacity(val) {
   currentOpacity = parseInt(val) / 10;
   document.getElementById('opacityVal').textContent = currentOpacity.toFixed(1);
   applyFilters();
+}
+
+const ZIP_HOODS = {
+  '94607':'West Oakland','94605':'East Oakland','94601':'Fruitvale',
+  '94621':'Coliseum/Elmhurst','94606':'San Antonio','94603':'Sobrante Park',
+  '94608':'Golden Gate','94609':'Temescal','94612':'Downtown','94602':'Glenview',
+  '94610':'Grand Lake','94611':'Montclair','94619':'Skyline','94618':'Piedmont Ave'
+};
+
+function generateSummary() {
+  const openPending = allData.filter(d => d.status !== 'closed');
+  const mapped = openPending.length;
+
+  const catCounts = {};
+  openPending.forEach(d => { catCounts[d.category] = (catCounts[d.category] || 0) + 1; });
+  const topCat = Object.entries(catCounts).sort((a,b) => b[1] - a[1])[0];
+
+  // Get top 3 ZIPs for the #1 category from the full API
+  const baseUrl = 'https://data.oaklandca.gov/resource/quth-gb8e.json';
+  const openStatuses = "('OPEN','PENDING','WAITING ON CUSTOMER','REFERRED','WOCREATE','UNFUNDED')";
+  const topCatRaw = topCat ? Object.keys(CATEGORY_LABELS).find(k => CATEGORY_LABELS[k] === topCat[0]) || topCat[0] : '';
+
+  const now = Date.now();
+  const ages = openPending.filter(d => d.date).map(d => (now - new Date(d.date).getTime()) / 86400000).filter(a => a > 0);
+  const avgAge = ages.length > 0 ? ages.reduce((s,v) => s+v, 0) / ages.length : 0;
+
+  // Fetch true total + top ZIPs for #1 category
+  const totalUrl = `${baseUrl}?$select=count(*)%20as%20cnt&$where=status%20in${encodeURIComponent(openStatuses)}`;
+  const zipUrl = `${baseUrl}?$select=zipcode,count(*)%20as%20cnt&$where=status%20in${encodeURIComponent(openStatuses)}%20AND%20reqcategory=%27${encodeURIComponent(topCatRaw)}%27%20AND%20zipcode%20IS%20NOT%20NULL&$group=zipcode&$order=cnt%20DESC&$limit=3`;
+
+  Promise.all([fetch(totalUrl).then(r => r.json()), fetch(zipUrl).then(r => r.json())])
+    .then(([totalData, zipData]) => {
+      const trueTotal = totalData[0] ? parseInt(totalData[0].cnt).toLocaleString() : mapped.toLocaleString();
+      const topZips = zipData.map(z => `${z.zipcode} ${ZIP_HOODS[z.zipcode] || ''} (${parseInt(z.cnt).toLocaleString()})`).join('<br>');
+      const topCatHtml = topCat
+        ? `<span class="hover-detail"><strong>${topCat[0]}</strong><span class="tooltip">Top ZIPs:<br>${topZips}</span></span>`
+        : 'Unknown';
+      const narrative = `There are <strong>${trueTotal}</strong> total open and pending service requests across Oakland. The #1 issue is ${topCatHtml} with ${topCat ? topCat[1].toLocaleString() : 0} cases on the map. The average open request has been waiting <strong>${formatAge(avgAge)}</strong> for resolution.`;
+      document.getElementById('narrativeText').innerHTML = narrative;
+      document.getElementById('narrativeCaveat').textContent = '*Only latest 10k results mapped below.';
+      document.getElementById('narrativeUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
+      document.getElementById('narrativeCard').classList.add('visible');
+    })
+    .catch(() => {
+      const narrative = `There are <strong>${mapped.toLocaleString()}</strong> open and pending service requests mapped. The #1 issue is <strong>${topCat ? topCat[0] : 'Unknown'}</strong> with ${topCat ? topCat[1].toLocaleString() : 0} cases. The average open request has been waiting <strong>${formatAge(avgAge)}</strong> for resolution.`;
+      document.getElementById('narrativeText').innerHTML = narrative;
+      document.getElementById('narrativeUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
+      document.getElementById('narrativeCard').classList.add('visible');
+    });
+}
+
+function toggleNarrative() {
+  const card = document.getElementById('narrativeCard');
+  const btn = card.querySelector('.collapse-btn');
+  card.classList.toggle('collapsed');
+  btn.textContent = card.classList.contains('collapsed') ? '+' : '—';
 }
 
 fetchData();
