@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oakland 311 Service Requests</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #map { width: 100%; height: 100vh; }
+
+  /* Apple-style frosted glass panel */
+  .panel {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 1000;
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-radius: 14px;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.12);
+    padding: 20px;
+    width: 310px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .panel::-webkit-scrollbar { display: none; }
+  .panel h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    margin-bottom: 2px;
+  }
+  .panel .subtitle {
+    font-size: 13px;
+    color: #86868b;
+    margin-bottom: 18px;
+  }
+
+  /* Stats */
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .stat-box {
+    background: rgba(255,255,255,0.6);
+    border: 0.5px solid rgba(0,0,0,0.06);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+  }
+  .stat-box .num {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .stat-box .lbl {
+    font-size: 10px;
+    color: #86868b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  /* Segmented control */
+  .segmented {
+    display: flex;
+    background: rgba(118,118,128,0.12);
+    border-radius: 9px;
+    padding: 2px;
+    margin-bottom: 16px;
+  }
+  .seg-btn {
+    flex: 1;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: none;
+    color: #1d1d1f;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .seg-btn.active {
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08), 0 0 0 0.5px rgba(0,0,0,0.04);
+  }
+
+  /* Legend toggles */
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 0.5px solid rgba(0,0,0,0.06);
+    cursor: pointer;
+    user-select: none;
+  }
+  .legend-item:last-child { border-bottom: none; }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .legend-label {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 400;
+    letter-spacing: -0.1px;
+  }
+  .legend-count {
+    font-size: 13px;
+    color: #86868b;
+    font-variant-numeric: tabular-nums;
+  }
+  .legend-toggle {
+    width: 42px;
+    height: 26px;
+    border-radius: 13px;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.3s;
+  }
+  .legend-toggle.on { background: #34c759; }
+  .legend-toggle.off { background: rgba(120,120,128,0.16); }
+  .legend-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.3s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+  .legend-toggle.on::after { transform: translateX(16px); }
+
+  /* Sections */
+  .section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #86868b;
+    margin-bottom: 10px;
+  }
+
+  /* Age stats */
+  .age-stats {
+    background: rgba(255,255,255,0.5);
+    border: 0.5px solid rgba(0,0,0,0.06);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .age-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    font-size: 13px;
+    border-bottom: 0.5px solid rgba(0,0,0,0.04);
+  }
+  .age-row:last-child { border-bottom: none; }
+  .age-row span:first-child { color: #86868b; }
+  .age-row span:last-child { font-weight: 600; }
+
+  /* Filter select */
+  .filter-select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 0.5px solid rgba(0,0,0,0.1);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    background: rgba(255,255,255,0.6);
+    color: #1d1d1f;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2386868b'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 30px;
+  }
+
+  /* Sliders */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .slider-row label {
+    font-size: 13px;
+    font-weight: 400;
+    white-space: nowrap;
+    color: #1d1d1f;
+  }
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: #007aff;
+    height: 4px;
+  }
+  .slider-row .val {
+    font-size: 13px;
+    color: #86868b;
+    width: 30px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Loading */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    font-size: 15px;
+    font-weight: 500;
+    color: #1d1d1f;
+  }
+  .loading-overlay.hidden { display: none; }
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(0,0,0,0.1);
+    border-top-color: #007aff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-banner {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
+    background: rgba(255,243,205,0.95);
+    backdrop-filter: blur(10px);
+    color: #856404;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+    display: none;
+    max-width: 500px;
+    text-align: center;
+  }
+  .error-banner.visible { display: block; }
+
+  /* Popups */
+  .leaflet-popup-content-wrapper {
+    border-radius: 12px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif !important;
+  }
+  .leaflet-popup-tip {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+  }
+  .popup-content { font-size: 13px; line-height: 1.6; }
+  .popup-content strong { font-size: 15px; font-weight: 600; letter-spacing: -0.1px; }
+  .popup-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  /* Special markers — Apple Maps annotation style */
+  .special-marker { background: none !important; border: none !important; }
+  .marker-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: #fff;
+    border-radius: 20px;
+    padding: 6px 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2), 0 0 0 0.5px rgba(0,0,0,0.08);
+    position: relative;
+    white-space: nowrap;
+    min-height: 36px;
+    width: max-content;
+    transform: translateX(-50%);
+  }
+  .marker-pill::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 10px;
+    background: #fff;
+    border-radius: 0 0 2px 0;
+    transform: translateX(-50%) rotate(45deg);
+    box-shadow: 2px 2px 2px rgba(0,0,0,0.1);
+  }
+  .marker-pill .marker-emoji {
+    font-size: 18px;
+    line-height: 1;
+  }
+  .marker-pill .marker-label {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .marker-pill.newest-open .marker-label { color: #bf5af2; }
+  .marker-pill.newest .marker-label { color: #34c759; }
+  .marker-pill.oldest .marker-label { color: #ff9f0a; }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+  }
+
+  /* Apple Maps zoom controls */
+  .leaflet-control-zoom {
+    border: none !important;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.12) !important;
+    border-radius: 10px !important;
+    overflow: hidden;
+  }
+  .leaflet-control-zoom a {
+    background: rgba(255,255,255,0.82) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    color: #1d1d1f !important;
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+    font-size: 18px !important;
+    border-bottom: 0.5px solid rgba(0,0,0,0.06) !important;
+  }
+  .leaflet-control-zoom a:last-child { border-bottom: none !important; }
+  .leaflet-control-zoom a:hover { background: rgba(245,245,247,0.9) !important; }
+
+  /* Legend key */
+  .legend-key {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .legend-key h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #86868b;
+    margin-bottom: 10px;
+  }
+  .key-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+    color: #1d1d1f;
+  }
+  .key-icon { font-size: 16px; width: 20px; text-align: center; }
+
+  /* Narrative overlay card */
+  .narrative-card {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 1000;
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-radius: 14px;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.12);
+    padding: 20px;
+    width: 300px;
+    max-width: calc(100vw - 350px);
+    display: none;
+    transition: all 0.3s;
+  }
+  .narrative-card.visible { display: block; }
+  .narrative-card.collapsed { padding: 10px 16px; }
+  .narrative-card .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .narrative-card .card-header h3 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+  .narrative-card .collapse-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(118,118,128,0.12);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #86868b;
+  }
+  .narrative-card .narrative-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #1d1d1f;
+  }
+  .narrative-card .narrative-text .hover-detail {
+    position: relative;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+  .narrative-card .narrative-text .hover-detail .tooltip {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1d1d1f;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    margin-bottom: 6px;
+    z-index: 10;
+  }
+  .narrative-card .narrative-text .hover-detail:hover .tooltip { display: block; }
+  .narrative-card .narrative-updated {
+    font-size: 11px;
+    color: #86868b;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .narrative-card.collapsed .card-body { display: none; }
+
+  /* Mobile bottom sheet */
+  @media (max-width: 600px) {
+    .panel {
+      display: none;
+    }
+    .narrative-card {
+      display: none !important;
+    }
+    .bottom-sheet {
+      display: block;
+    }
+  }
+
+  .bottom-sheet {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 2000;
+    background: rgba(255,255,255,0.96);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -2px 20px rgba(0,0,0,0.1), 0 0 0 0.5px rgba(0,0,0,0.05);
+    transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+    max-height: 85vh;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .bottom-sheet .sheet-handle {
+    width: 36px;
+    height: 5px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 3px;
+    margin: 8px auto;
+  }
+  .bottom-sheet .sheet-peek {
+    padding: 4px 20px 16px;
+  }
+  .bottom-sheet .sheet-peek .peek-title {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+  .bottom-sheet .sheet-peek .peek-subtitle {
+    font-size: 13px;
+    color: #86868b;
+    margin-top: 2px;
+  }
+  .bottom-sheet .sheet-content {
+    padding: 0 20px 32px;
+    max-height: calc(85vh - 80px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: none;
+  }
+  .bottom-sheet.half .sheet-content {
+    display: block;
+    max-height: 40vh;
+  }
+  .bottom-sheet.full .sheet-content {
+    display: block;
+    max-height: calc(85vh - 80px);
+  }
+
+  /* Sheet internal styles */
+  .sheet-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .sheet-stat {
+    background: rgba(0,0,0,0.03);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+  }
+  .sheet-stat .num {
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .sheet-stat .lbl {
+    font-size: 10px;
+    color: #86868b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .sheet-section {
+    margin-bottom: 16px;
+  }
+  .sheet-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #86868b;
+    margin-bottom: 8px;
+  }
+  .sheet-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 0.5px solid rgba(0,0,0,0.06);
+  }
+  .sheet-legend-item:last-child { border-bottom: none; }
+  .sheet-legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .sheet-legend-label {
+    flex: 1;
+    font-size: 15px;
+  }
+  .sheet-legend-count {
+    font-size: 13px;
+    color: #86868b;
+  }
+  .sheet-toggle {
+    width: 42px;
+    height: 26px;
+    border-radius: 13px;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.3s;
+  }
+  .sheet-toggle.on { background: #34c759; }
+  .sheet-toggle.off { background: rgba(120,120,128,0.16); }
+  .sheet-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.3s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+  .sheet-toggle.on::after { transform: translateX(16px); }
+  .sheet-filter {
+    width: 100%;
+    padding: 10px 12px;
+    border: 0.5px solid rgba(0,0,0,0.1);
+    border-radius: 10px;
+    font-size: 14px;
+    font-family: inherit;
+    background: rgba(255,255,255,0.6);
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .sheet-key-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+  .sheet-narrative {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #1d1d1f;
+    margin-bottom: 8px;
+  }
+  .sheet-meta {
+    font-size: 11px;
+    color: #86868b;
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="narrative-card" id="narrativeCard">
+  <div class="card-header">
+    <h3>Summary</h3>
+    <button class="collapse-btn" onclick="toggleNarrative()">—</button>
+  </div>
+  <div class="card-body">
+    <div class="narrative-text" id="narrativeText"></div>
+    <div class="narrative-updated" id="narrativeCaveat" style="margin-top:12px;padding-top:12px"></div>
+    <div class="narrative-updated" id="narrativeUpdated" style="margin-top:4px;border-top:none;padding-top:0"></div>
+  </div>
+</div>
+
+<!-- Mobile bottom sheet -->
+<div class="bottom-sheet" id="bottomSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-peek" id="sheetPeek">
+    <div class="peek-title">Oakland 311</div>
+    <div class="peek-subtitle" id="sheetPeekSub">Loading...</div>
+  </div>
+  <div class="sheet-content">
+    <div class="sheet-section">
+      <div class="sheet-narrative" id="sheetNarrative"></div>
+      <div class="sheet-meta" id="sheetMeta"></div>
+    </div>
+    <div class="sheet-section">
+      <div class="sheet-stats">
+        <div class="sheet-stat"><div class="num" id="sheetTotal">--</div><div class="lbl">Total</div></div>
+        <div class="sheet-stat"><div class="num" id="sheetOpen" style="color:#34c759">--</div><div class="lbl">Open</div></div>
+        <div class="sheet-stat"><div class="num" id="sheetPending" style="color:#ff9f0a">--</div><div class="lbl">Pending</div></div>
+      </div>
+    </div>
+    <div class="sheet-section">
+      <h3>Status</h3>
+      <div class="sheet-legend-item">
+        <div class="sheet-legend-dot" style="background:#34c759"></div>
+        <span class="sheet-legend-label">Open</span>
+        <span class="sheet-legend-count" id="sheetOpenBadge">0</span>
+        <button class="sheet-toggle on" id="sheet-tog-open" onclick="toggleStatus('open');updateSheetToggle(this)"></button>
+      </div>
+      <div class="sheet-legend-item">
+        <div class="sheet-legend-dot" style="background:#ff9f0a"></div>
+        <span class="sheet-legend-label">Pending</span>
+        <span class="sheet-legend-count" id="sheetPendingBadge">0</span>
+        <button class="sheet-toggle on" id="sheet-tog-pending" onclick="toggleStatus('pending');updateSheetToggle(this)"></button>
+      </div>
+      <div class="sheet-legend-item">
+        <div class="sheet-legend-dot" style="background:#8e8e93"></div>
+        <span class="sheet-legend-label">Closed</span>
+        <span class="sheet-legend-count" id="sheetClosedBadge">0</span>
+        <button class="sheet-toggle off" id="sheet-tog-closed" onclick="toggleStatus('closed');updateSheetToggle(this)"></button>
+      </div>
+    </div>
+    <div class="sheet-section">
+      <h3>Category</h3>
+      <select class="sheet-filter" id="sheetCategoryFilter" onchange="document.getElementById('categoryFilter').value=this.value;applyFilters()">
+        <option value="">All Categories</option>
+      </select>
+    </div>
+    <div class="sheet-section">
+      <h3>Map Key</h3>
+      <div class="sheet-key-item"><span>🐳</span> 5 newest open requests</div>
+      <div class="sheet-key-item"><span>⭐</span> 5 newest pending</div>
+      <div class="sheet-key-item"><span>⏳</span> 5 oldest pending</div>
+      <div class="sheet-key-item"><span style="color:#f5a3a0">●</span> Pending 28+ days</div>
+    </div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <span id="loadingText">Loading 311 data...</span>
+</div>
+
+<div class="error-banner" id="errorBanner"></div>
+
+<div class="panel" id="panel">
+  <h1>Oakland 311</h1>
+  <p class="subtitle">Service requests by status</p>
+
+  <div class="stats">
+    <div class="stat-box">
+      <div class="num" id="totalCount">--</div>
+      <div class="lbl">Total</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="openCount" style="color:#34c759">--</div>
+      <div class="lbl">Open</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="pendingCount" style="color:#ff9f0a">--</div>
+      <div class="lbl">Pending</div>
+    </div>
+  </div>
+
+  <div class="segmented">
+    <button class="seg-btn" onclick="setMode('heat')">Heatmap</button>
+    <button class="seg-btn active" onclick="setMode('points')">Points</button>
+  </div>
+
+  <div>
+    <div class="legend-item" onclick="toggleStatus('open')">
+      <div class="legend-dot" style="background:#34c759"></div>
+      <span class="legend-label">Open</span>
+      <span class="legend-count" id="openBadge">0</span>
+      <button class="legend-toggle on" id="tog-open"></button>
+    </div>
+    <div class="legend-item" onclick="toggleStatus('pending')">
+      <div class="legend-dot" style="background:#ff9f0a"></div>
+      <span class="legend-label">Pending</span>
+      <span class="legend-count" id="pendingBadge">0</span>
+      <button class="legend-toggle on" id="tog-pending"></button>
+    </div>
+    <div class="legend-item" onclick="toggleStatus('pendingOld')">
+      <div class="legend-dot" style="background:#f5a3a0"></div>
+      <span class="legend-label">Pending 25+ days</span>
+      <span class="legend-count" id="pendingOldBadge">0</span>
+      <button class="legend-toggle on" id="tog-pendingOld"></button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Age of Open / Pending</h3>
+    <div class="age-stats">
+      <div class="age-row"><span>Avg age</span><span id="avgAge">--</span></div>
+      <div class="age-row"><span>Median age</span><span id="medAge">--</span></div>
+      <div class="age-row"><span>Oldest open</span><span id="maxAge">--</span></div>
+      <div class="age-row"><span>Newest open</span><span id="minAge">--</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Category</h3>
+    <select class="filter-select" id="categoryFilter" onchange="applyFilters()">
+      <option value="">All Categories</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <h3>Display</h3>
+    <div class="slider-row">
+      <label>Radius</label>
+      <input type="range" id="radiusSlider" min="5" max="40" value="18" oninput="updateRadius(this.value)">
+      <span class="val" id="radiusVal">18</span>
+    </div>
+    <div class="slider-row">
+      <label>Opacity</label>
+      <input type="range" id="opacitySlider" min="1" max="10" value="6" oninput="updateOpacity(this.value)">
+      <span class="val" id="opacityVal">0.6</span>
+    </div>
+  </div>
+
+  <div class="legend-key">
+    <h3>Map Key</h3>
+    <div class="key-item"><span class="key-icon">🐳</span> 5 newest open requests</div>
+    <div class="key-item"><span class="key-icon">⭐</span> 5 newest pending</div>
+    <div class="key-item"><span class="key-icon">⏳</span> 5 oldest pending</div>
+  </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script>
+const map = L.map('map', { zoomControl: false }).setView([37.8044, -122.2712], 13);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+// Apple Maps-style tile layer
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  maxZoom: 19,
+  subdomains: 'abcd'
+}).addTo(map);
+
+let allData = [];
+let statusVisible = { open: true, pending: true, pendingOld: true, closed: false };
+let displayMode = 'points';
+let heatLayers = {};
+let pointLayers = {};
+let currentRadius = 18;
+let currentOpacity = 0.6;
+
+const STATUS_COLORS = {
+  open:    { heat: { 0.4: '#e0f5e4', 0.65: '#8fd9a0', 1: '#5ec26a' }, point: '#8fd9a0', border: '#5daf6b' },
+  pending: { heat: { 0.4: '#fff8dc', 0.65: '#ffd970', 1: '#f0c030' }, point: '#ffd970', border: '#d4b33a' },
+  closed:  { heat: { 0.4: '#ededf0', 0.65: '#c7c7cc', 1: '#a8a8ad' }, point: '#d1d1d6', border: '#b0b0b5' }
+};
+
+const CATEGORY_LABELS = {
+  ILLDUMP: 'Illegal Dumping', OTHER: 'Other', 'ABANDONED AUTO': 'Abandoned Vehicle',
+  BLDGMAINT: 'Building Maintenance', POLICE: 'Police', STREETSW: 'Street Sweeping',
+  GRAFFITI: 'Graffiti', PARKING: 'Parking', ELECTRICAL: 'Electrical/Streetlight',
+  TREES: 'Trees', RECYCLING: 'Recycling', TRAFFIC: 'Traffic', PARKS: 'Parks',
+  'HOMELESS EMT': 'Homeless Encampment', TRAFFIC_ENGIN: 'Traffic Engineering',
+  METER_REPAIR: 'Meter Repair', DRAINAGE: 'Drainage', SEWERS: 'Sewers',
+  KOCB: 'Keep Oakland Clean', ROW_INSPECTORS: 'Right-of-Way Inspectors',
+  HE_CLEAN: 'Homeless Encampment Cleanup',
+  FIRE: 'Fire', CUT_CLEAN: 'Cut & Clean', ENVIRON_ENF: 'Environmental Enforcement',
+  ROW: 'Right of Way', SIDESHOWS: 'Sideshows'
+};
+
+const CATEGORY_EMOJIS = {
+  'Illegal Dumping': '🗑️', 'Other': '❓', 'Abandoned Vehicle': '🚗',
+  'Building Maintenance': '🏢', 'Police': '🚔', 'Street Sweeping': '🧹',
+  'Graffiti': '🎨', 'Parking': '🅿️', 'Electrical/Streetlight': '💡',
+  'Trees': '🌳', 'Recycling': '♻️', 'Traffic': '🚦', 'Parks': '🏞️',
+  'Homeless Encampment': '🏕️', 'Traffic Engineering': '🚧',
+  'Meter Repair': '🔧', 'Drainage': '💧', 'Sewers': '🕳️',
+  'Keep Oakland Clean': '✨', 'Right-of-Way Inspectors': '📋',
+  'Homeless Encampment Cleanup': '🧤',
+  'Fire': '🔥', 'Cut & Clean': '✂️', 'Environmental Enforcement': '🌿',
+  'Right of Way': '🛤️', 'Sideshows': '🚙'
+};
+
+const EXCLUDED_CATEGORIES = new Set(['CW_DIT_GIS', 'ROW_STREETSW', 'WATERSHED', '', 'SURVEY']);
+
+function classifyStatus(raw) {
+  if (!raw) return 'open';
+  const s = raw.toUpperCase();
+  if (s === 'CLOSED' || s.includes('CANCEL') || s === 'GONE ON ARRIVAL'
+      || s === 'EVALUATED - NO FURTHER ACTION' || s === 'REQUEST COMPLETE') return 'closed';
+  if (s === 'PENDING' || s === 'WAITING ON CUSTOMER' || s === 'REFERRED'
+      || s === 'WOCREATE' || s === 'UNFUNDED') return 'pending';
+  return 'open';
+}
+
+function labelCategory(raw) {
+  return CATEGORY_LABELS[raw] || raw || 'Unknown';
+}
+
+async function fetchData() {
+  const loadingText = document.getElementById('loadingText');
+  const baseUrl = 'https://data.oaklandca.gov/resource/quth-gb8e.json';
+  const selectFields = 'requestid,datetimeinit,description,reqcategory,status,probaddress,srx,sry';
+  const geoFilter = 'srx IS NOT NULL AND sry IS NOT NULL';
+
+  try {
+    allData = [];
+
+    loadingText.textContent = 'Loading open & pending requests...';
+    const openStatuses = "('OPEN','PENDING','WAITING ON CUSTOMER','REFERRED','WOCREATE','UNFUNDED')";
+    const openUrl = `${baseUrl}?$limit=10000&$select=${selectFields}&$where=${geoFilter} AND status in ${openStatuses}&$order=datetimeinit DESC`;
+    const openResp = await fetch(openUrl);
+    if (!openResp.ok) throw new Error(`API returned ${openResp.status}`);
+    const openRows = await openResp.json();
+    processRows(openRows);
+
+    loadingText.textContent = `Processing ${allData.length.toLocaleString()} records...`;
+
+    if (allData.length === 0) throw new Error('No geolocated records found');
+
+    populateCategories();
+    updateStats();
+    applyFilters();
+    generateSummary();
+    document.getElementById('loading').classList.add('hidden');
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('loading').classList.add('hidden');
+    const banner = document.getElementById('errorBanner');
+    banner.textContent = `Could not load live data: ${err.message}`;
+    banner.classList.add('visible');
+  }
+}
+
+function processRows(rows) {
+  for (const row of rows) {
+    if (EXCLUDED_CATEGORIES.has(row.reqcategory || '')) continue;
+    const lat = parseFloat(row.sry);
+    const lng = parseFloat(row.srx);
+    if (isNaN(lat) || isNaN(lng)) continue;
+    if (lat < 37.6 || lat > 38.0 || lng < -122.5 || lng > -122.0) continue;
+
+    allData.push({
+      lat, lng,
+      status: classifyStatus(row.status),
+      category: labelCategory(row.reqcategory),
+      rawCategory: row.reqcategory || '',
+      address: row.probaddress || '',
+      date: row.datetimeinit || '',
+      id: row.requestid || '',
+      rawStatus: row.status || '',
+      description: row.description || ''
+    });
+  }
+}
+
+function populateCategories() {
+  const catCounts = {};
+  allData.forEach(d => { catCounts[d.category] = (catCounts[d.category] || 0) + 1; });
+  const cats = Object.keys(catCounts).sort();
+  const sel = document.getElementById('categoryFilter');
+  sel.innerHTML = '<option value="">All Categories</option>';
+  cats.forEach(c => {
+    const emoji = CATEGORY_EMOJIS[c] || '❓';
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = `${emoji} ${c} (${catCounts[c].toLocaleString()})`;
+    sel.appendChild(opt);
+  });
+}
+
+function updateStats() {
+  const filtered = getFilteredData();
+  const open = filtered.filter(d => d.status === 'open').length;
+  const pending = filtered.filter(d => d.status === 'pending').length;
+  const closed = filtered.filter(d => d.status === 'closed').length;
+
+  document.getElementById('totalCount').textContent = filtered.length.toLocaleString();
+  document.getElementById('openCount').textContent = open.toLocaleString();
+  document.getElementById('pendingCount').textContent = pending.toLocaleString();
+  document.getElementById('openBadge').textContent = open.toLocaleString();
+  document.getElementById('pendingBadge').textContent = pending.toLocaleString();
+
+  const now25badge = Date.now() - (25 * 86400000);
+  const pendingOldCount = filtered.filter(d => d.status === 'pending' && d.date && new Date(d.date).getTime() < now25badge).length;
+  document.getElementById('pendingOldBadge').textContent = pendingOldCount.toLocaleString();
+
+  const now = Date.now();
+  const openPending = filtered.filter(d => d.status !== 'closed' && d.date);
+  const ages = openPending.map(d => (now - new Date(d.date).getTime()) / 86400000).filter(a => a > 0).sort((a,b) => a - b);
+
+  if (ages.length > 0) {
+    const avg = ages.reduce((s,v) => s + v, 0) / ages.length;
+    const med = ages.length % 2 === 0 ? (ages[ages.length/2-1] + ages[ages.length/2]) / 2 : ages[Math.floor(ages.length/2)];
+    document.getElementById('avgAge').textContent = formatAge(avg);
+    document.getElementById('medAge').textContent = formatAge(med);
+    document.getElementById('maxAge').textContent = formatAge(ages[ages.length - 1]);
+    document.getElementById('minAge').textContent = formatAge(ages[0]);
+  } else {
+    ['avgAge','medAge','maxAge','minAge'].forEach(id => document.getElementById(id).textContent = '--');
+  }
+}
+
+function formatAge(days) {
+  if (days < 1) return 'Less than a day';
+  if (days < 30) return `${Math.round(days)} day${Math.round(days) !== 1 ? 's' : ''}`;
+  if (days < 365) { const m = Math.round(days / 30); return `${m} month${m !== 1 ? 's' : ''}`; }
+  const y = (days / 365).toFixed(1); return `${y} yrs`;
+}
+
+function ageLabel(dateStr) {
+  if (!dateStr) return '';
+  const days = (Date.now() - new Date(dateStr).getTime()) / 86400000;
+  if (days <= 0) return '';
+  return formatAge(days);
+}
+
+function getFilteredData() {
+  const cat = document.getElementById('categoryFilter').value;
+  return allData.filter(d => {
+    if (cat && d.category !== cat) return false;
+    return true;
+  });
+}
+
+function applyFilters() {
+  clearLayers();
+  updateStats();
+  const filtered = getFilteredData();
+
+  // Zoom to fit filtered points when a category is selected
+  const cat = document.getElementById('categoryFilter').value;
+  if (cat && filtered.length > 0) {
+    const bounds = L.latLngBounds(filtered.map(d => [d.lat, d.lng]));
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+  }
+
+  const grouped = { open: [], pending: [], closed: [] };
+  filtered.forEach(d => grouped[d.status].push(d));
+
+  if (displayMode === 'heat') {
+    // Split pending into recent vs 25+ days for separate heat layers
+    const now25heat = Date.now() - (25 * 86400000);
+    const pendingRecent = grouped.pending.filter(d => !d.date || new Date(d.date).getTime() >= now25heat);
+    const pendingOld = grouped.pending.filter(d => d.date && new Date(d.date).getTime() < now25heat);
+
+    const heatGroups = {
+      open: grouped.open,
+      pending: pendingRecent,
+      pendingOld: pendingOld,
+      closed: grouped.closed
+    };
+
+    const heatGradients = {
+      open: STATUS_COLORS.open.heat,
+      pending: STATUS_COLORS.pending.heat,
+      pendingOld: { 0.4: '#fde0df', 0.65: '#f5a3a0', 1: '#e07572' },
+      closed: STATUS_COLORS.closed.heat
+    };
+
+    Object.keys(heatGroups).forEach(key => {
+      const visKey = key === 'pendingOld' ? 'pendingOld' : key;
+      if (!statusVisible[visKey]) return;
+      const points = heatGroups[key].map(d => [d.lat, d.lng, 0.7]);
+      if (points.length === 0) return;
+      heatLayers[key] = L.heatLayer(points, {
+        radius: currentRadius,
+        blur: 15,
+        maxZoom: 17,
+        gradient: heatGradients[key],
+        minOpacity: currentOpacity * 0.3,
+        max: 1.0
+      }).addTo(map);
+    });
+
+    // Add special markers on top of heatmap
+    const openOnly = filtered.filter(d => d.status === 'open' && d.date)
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+    const openPending = filtered.filter(d => d.status !== 'closed' && d.date)
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+    const oldest5 = new Set(openPending.slice(0, 5).map(d => d.id));
+    const newest5 = new Set(openPending.slice(-5).map(d => d.id));
+    const newestOpen5 = new Set(openOnly.slice(-5).map(d => d.id));
+    const specialIds = new Set([...oldest5, ...newest5, ...newestOpen5]);
+
+    const specialLayer = L.layerGroup();
+    filtered.forEach(d => {
+      if (!statusVisible[d.status]) return;
+      const isNewest = newest5.has(d.id);
+      const isOldest = oldest5.has(d.id);
+      const isNewestOpen = newestOpen5.has(d.id) && !isNewest;
+
+      if (!isNewest && !isOldest && !isNewestOpen) return;
+
+      let marker;
+      let dotColor;
+      if (isNewestOpen) {
+        dotColor = '#34c759';
+        marker = L.marker([d.lat, d.lng], {
+          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill newest-open"><span class="marker-emoji">🐳</span><span class="marker-label">Newest Open</span></div>', iconSize: [0, 0], iconAnchor: [0, 44] }),
+          zIndexOffset: 900
+        });
+      } else if (isNewest) {
+        dotColor = '#ffd700';
+        marker = L.marker([d.lat, d.lng], {
+          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill newest"><span class="marker-emoji">⭐</span><span class="marker-label">New</span></div>', iconSize: [0, 0], iconAnchor: [0, 44] }),
+          zIndexOffset: 1000
+        });
+      } else {
+        dotColor = '#f5a3a0';
+        marker = L.marker([d.lat, d.lng], {
+          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill oldest"><span class="marker-emoji">⏳</span><span class="marker-label">Pending</span></div>', iconSize: [0, 0], iconAnchor: [0, 44] }),
+          zIndexOffset: 1000
+        });
+      }
+
+      // Add colored dot at the location
+      const dot = L.circleMarker([d.lat, d.lng], {
+        radius: 7,
+        fillColor: dotColor,
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 0.9
+      });
+      specialLayer.addLayer(dot);
+
+      const dateStr = d.date ? new Date(d.date).toLocaleDateString() : '';
+      const statusColor = d.status === 'open' ? '#34c759' : d.status === 'pending' ? '#ff9f0a' : '#8e8e93';
+      const age = (d.status !== 'closed' && d.date) ? ageLabel(d.date) : '';
+      const badge = isNewestOpen ? '<span style="color:#bf5af2;font-weight:700"> 🐳 NEWEST OPEN</span>' :
+                    isNewest ? '<span style="color:#007aff;font-weight:700"> ⭐ NEWEST</span>' :
+                    '<span style="color:#e07572;font-weight:700"> ⏳ OLDEST</span>';
+      marker.bindPopup(`
+        <div class="popup-content">
+          <strong>${d.category}</strong>${badge}<br>
+          ${d.description ? '<span>' + d.description + '</span><br>' : ''}
+          <span class="popup-status" style="background:${statusColor}18;color:${statusColor}">${d.rawStatus}</span>
+          ${age ? ' <span style="color:#86868b;font-size:11px">· open ' + age + '</span>' : ''}<br>
+          ${d.address ? d.address + '<br>' : ''}
+          ${dateStr ? '<span style="color:#86868b">Opened: ' + dateStr + '</span><br>' : ''}
+          <span style="color:#86868b">ID: ${d.id}</span>
+        </div>
+      `);
+      specialLayer.addLayer(marker);
+    });
+    pointLayers['_special'] = specialLayer;
+    specialLayer.addTo(map);
+
+    // Invisible click layer for all other points
+    const clickLayer = L.layerGroup();
+    Object.keys(grouped).forEach(status => {
+      if (!statusVisible[status]) return;
+      grouped[status].forEach(d => {
+        if (specialIds.has(d.id)) return;
+        const marker = L.circleMarker([d.lat, d.lng], {
+          radius: 8, fillColor: 'transparent', color: 'transparent', fillOpacity: 0, opacity: 0
+        });
+        const dateStr = d.date ? new Date(d.date).toLocaleDateString() : '';
+        const statusColor = status === 'open' ? '#34c759' : status === 'pending' ? '#ff9f0a' : '#8e8e93';
+        const age = (status !== 'closed' && d.date) ? ageLabel(d.date) : '';
+        marker.bindPopup(`
+          <div class="popup-content">
+            <strong>${d.category}</strong><br>
+            ${d.description ? '<span>' + d.description + '</span><br>' : ''}
+            <span class="popup-status" style="background:${statusColor}18;color:${statusColor}">${d.rawStatus}</span>
+            ${age ? ' <span style="color:#86868b;font-size:11px">· open ' + age + '</span>' : ''}<br>
+            ${d.address ? d.address + '<br>' : ''}
+            ${dateStr ? '<span style="color:#86868b">Opened: ' + dateStr + '</span><br>' : ''}
+            <span style="color:#86868b">ID: ${d.id}</span>
+          </div>
+        `);
+        clickLayer.addLayer(marker);
+      });
+    });
+    pointLayers['_click'] = clickLayer;
+    clickLayer.addTo(map);
+
+  } else {
+    const openOnly = filtered.filter(d => d.status === 'open' && d.date)
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+    const openPending = filtered.filter(d => d.status !== 'closed' && d.date)
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+    const oldest5 = new Set(openPending.slice(0, 5).map(d => d.id));
+    const newest5 = new Set(openPending.slice(-5).map(d => d.id));
+    const newestOpen5 = new Set(openOnly.slice(-5).map(d => d.id));
+
+    // Pending cases older than 25 days — color red
+    const now25 = Date.now() - (25 * 86400000);
+    const oldPending28 = new Set(
+      grouped.pending.filter(d => d.date && new Date(d.date).getTime() < now25).map(d => d.id)
+    );
+
+    Object.keys(grouped).forEach(status => {
+      if (!statusVisible[status]) return;
+      const markers = L.layerGroup();
+      grouped[status].forEach(d => {
+        let marker;
+        const isNewest = newest5.has(d.id);
+        const isOldest = oldest5.has(d.id);
+        const isNewestOpen = newestOpen5.has(d.id) && !isNewest;
+        const isOldPending = oldPending28.has(d.id) && !isOldest;
+
+        if (isNewestOpen) {
+          markers.addLayer(L.circleMarker([d.lat, d.lng], { radius: 7, fillColor: '#34c759', color: '#fff', weight: 2, fillOpacity: 0.9 }));
+          marker = L.marker([d.lat, d.lng], {
+            icon: L.divIcon({
+              className: 'special-marker',
+              html: '<div class="marker-pill newest-open"><span class="marker-emoji">🐳</span><span class="marker-label">Newest Open</span></div>',
+              iconSize: [0, 0], iconAnchor: [0, 44]
+            }),
+            zIndexOffset: 900
+          });
+        } else if (isNewest) {
+          markers.addLayer(L.circleMarker([d.lat, d.lng], { radius: 7, fillColor: '#ffd700', color: '#fff', weight: 2, fillOpacity: 0.9 }));
+          marker = L.marker([d.lat, d.lng], {
+            icon: L.divIcon({
+              className: 'special-marker',
+              html: '<div class="marker-pill newest"><span class="marker-emoji">⭐</span><span class="marker-label">New</span></div>',
+              iconSize: [0, 0], iconAnchor: [0, 44]
+            }),
+            zIndexOffset: 1000
+          });
+        } else if (isOldest) {
+          markers.addLayer(L.circleMarker([d.lat, d.lng], { radius: 7, fillColor: '#f5a3a0', color: '#fff', weight: 2, fillOpacity: 0.9 }));
+          marker = L.marker([d.lat, d.lng], {
+            icon: L.divIcon({
+              className: 'special-marker',
+              html: '<div class="marker-pill oldest"><span class="marker-emoji">⏳</span><span class="marker-label">Pending</span></div>',
+              iconSize: [0, 0], iconAnchor: [0, 44]
+            }),
+            zIndexOffset: 1000
+          });
+        } else if (isOldPending) {
+          if (!statusVisible.pendingOld) {
+            marker = L.circleMarker([d.lat, d.lng], {
+              radius: 6,
+              fillColor: STATUS_COLORS[status].point,
+              color: STATUS_COLORS[status].border,
+              weight: 1.5,
+              fillOpacity: 0.55,
+              opacity: 0.7
+            });
+          } else {
+            marker = L.circleMarker([d.lat, d.lng], {
+              radius: 6,
+              fillColor: '#f5a3a0',
+              color: '#e07572',
+              weight: 1.5,
+              fillOpacity: 0.6,
+              opacity: 0.7
+            });
+          }
+        } else {
+          marker = L.circleMarker([d.lat, d.lng], {
+            radius: 6,
+            fillColor: STATUS_COLORS[status].point,
+            color: STATUS_COLORS[status].border,
+            weight: 1.5,
+            fillOpacity: 0.55,
+            opacity: 0.7
+          });
+        }
+
+        const dateStr = d.date ? new Date(d.date).toLocaleDateString() : '';
+        const statusColor = isOldPending ? '#f5a3a0' : (status === 'open' ? '#34c759' : status === 'pending' ? '#ff9f0a' : '#8e8e93');
+        const age = (status !== 'closed' && d.date) ? ageLabel(d.date) : '';
+        const badge = isOldPending ? '<span style="color:#e07572;font-weight:700"> 🔴 PENDING 25+ DAYS</span>' :
+                      isNewestOpen ? '<span style="color:#bf5af2;font-weight:700"> 🐳 NEWEST OPEN</span>' :
+                      isNewest ? '<span style="color:#007aff;font-weight:700"> ⭐ NEWEST</span>' :
+                      isOldest ? '<span style="color:#e07572;font-weight:700"> ⏳ OLDEST</span>' : '';
+        marker.bindPopup(`
+          <div class="popup-content">
+            <strong>${d.category}</strong>${badge}<br>
+            ${d.description ? '<span>' + d.description + '</span><br>' : ''}
+            <span class="popup-status" style="background:${statusColor}18;color:${statusColor}">${d.rawStatus}</span>
+            ${age ? ' <span style="color:#86868b;font-size:11px">· open ' + age + '</span>' : ''}<br>
+            ${d.address ? d.address + '<br>' : ''}
+            ${dateStr ? '<span style="color:#86868b">Opened: ' + dateStr + '</span><br>' : ''}
+            <span style="color:#86868b">ID: ${d.id}</span>
+          </div>
+        `);
+        markers.addLayer(marker);
+      });
+      pointLayers[status] = markers;
+      markers.addTo(map);
+    });
+  }
+}
+
+function clearLayers() {
+  Object.values(heatLayers).forEach(l => map.removeLayer(l));
+  Object.values(pointLayers).forEach(l => map.removeLayer(l));
+  heatLayers = {};
+  pointLayers = {};
+}
+
+function toggleStatus(status) {
+  statusVisible[status] = !statusVisible[status];
+  const tog = document.getElementById('tog-' + status);
+  tog.classList.toggle('on');
+  tog.classList.toggle('off');
+  applyFilters();
+}
+
+function setMode(mode) {
+  displayMode = mode;
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.seg-btn[onclick="setMode('${mode}')"]`).classList.add('active');
+  applyFilters();
+}
+
+function updateRadius(val) {
+  currentRadius = parseInt(val);
+  document.getElementById('radiusVal').textContent = val;
+  applyFilters();
+}
+
+function updateOpacity(val) {
+  currentOpacity = parseInt(val) / 10;
+  document.getElementById('opacityVal').textContent = currentOpacity.toFixed(1);
+  applyFilters();
+}
+
+const ZIP_HOODS = {
+  '94607':'West Oakland','94605':'East Oakland','94601':'Fruitvale',
+  '94621':'Coliseum/Elmhurst','94606':'San Antonio','94603':'Sobrante Park',
+  '94608':'Golden Gate','94609':'Temescal','94612':'Downtown','94602':'Glenview',
+  '94610':'Grand Lake','94611':'Montclair','94619':'Skyline','94618':'Piedmont Ave'
+};
+
+function generateSummary() {
+  const openPending = allData.filter(d => d.status !== 'closed');
+  const mapped = openPending.length;
+
+  const catCounts = {};
+  openPending.forEach(d => { catCounts[d.category] = (catCounts[d.category] || 0) + 1; });
+  const topCat = Object.entries(catCounts).sort((a,b) => b[1] - a[1])[0];
+
+  // Get top 3 ZIPs for the #1 category from the full API
+  const baseUrl = 'https://data.oaklandca.gov/resource/quth-gb8e.json';
+  const openStatuses = "('OPEN','PENDING','WAITING ON CUSTOMER','REFERRED','WOCREATE','UNFUNDED')";
+  const topCatRaw = topCat ? Object.keys(CATEGORY_LABELS).find(k => CATEGORY_LABELS[k] === topCat[0]) || topCat[0] : '';
+
+  const now = Date.now();
+  const ages = openPending.filter(d => d.date).map(d => (now - new Date(d.date).getTime()) / 86400000).filter(a => a > 0);
+  const avgAge = ages.length > 0 ? ages.reduce((s,v) => s+v, 0) / ages.length : 0;
+
+  // Fetch true total + top ZIPs for #1 category
+  const totalUrl = `${baseUrl}?$select=count(*)%20as%20cnt&$where=status%20in${encodeURIComponent(openStatuses)}`;
+  const zipUrl = `${baseUrl}?$select=zipcode,count(*)%20as%20cnt&$where=status%20in${encodeURIComponent(openStatuses)}%20AND%20reqcategory=%27${encodeURIComponent(topCatRaw)}%27%20AND%20zipcode%20IS%20NOT%20NULL&$group=zipcode&$order=cnt%20DESC&$limit=3`;
+
+  Promise.all([fetch(totalUrl).then(r => r.json()), fetch(zipUrl).then(r => r.json())])
+    .then(([totalData, zipData]) => {
+      const trueTotal = totalData[0] ? parseInt(totalData[0].cnt).toLocaleString() : mapped.toLocaleString();
+      const topZips = zipData.map(z => `${z.zipcode} ${ZIP_HOODS[z.zipcode] || ''} (${parseInt(z.cnt).toLocaleString()})`).join('<br>');
+      const topCatHtml = topCat
+        ? `<span class="hover-detail"><strong>${topCat[0]}</strong><span class="tooltip">Top ZIPs:<br>${topZips}</span></span>`
+        : 'Unknown';
+      const narrative = `There are <strong>${trueTotal}</strong> total open and pending service requests across Oakland. The #1 issue is ${topCatHtml} with ${topCat ? topCat[1].toLocaleString() : 0} cases on the map. The average open request has been waiting <strong>${formatAge(avgAge)}</strong> for resolution.`;
+      document.getElementById('narrativeText').innerHTML = narrative;
+      document.getElementById('narrativeCaveat').textContent = '*Only latest 10k results mapped below.';
+      document.getElementById('narrativeUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
+      document.getElementById('narrativeCard').classList.add('visible');
+    })
+    .catch(() => {
+      const narrative = `There are <strong>${mapped.toLocaleString()}</strong> open and pending service requests mapped. The #1 issue is <strong>${topCat ? topCat[0] : 'Unknown'}</strong> with ${topCat ? topCat[1].toLocaleString() : 0} cases. The average open request has been waiting <strong>${formatAge(avgAge)}</strong> for resolution.`;
+      document.getElementById('narrativeText').innerHTML = narrative;
+      document.getElementById('narrativeUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
+      document.getElementById('narrativeCard').classList.add('visible');
+    });
+}
+
+function toggleNarrative() {
+  const card = document.getElementById('narrativeCard');
+  const btn = card.querySelector('.collapse-btn');
+  card.classList.toggle('collapsed');
+  btn.textContent = card.classList.contains('collapsed') ? '+' : '—';
+}
+
+// Bottom sheet logic
+const sheet = document.getElementById('bottomSheet');
+let sheetState = 'peek'; // peek, half, full
+let touchStartY = 0;
+let touchCurrentY = 0;
+
+function setSheetState(state) {
+  sheetState = state;
+  sheet.classList.remove('half', 'full');
+  if (state === 'half') sheet.classList.add('half');
+  if (state === 'full') sheet.classList.add('full');
+}
+
+if (sheet) {
+  const peekArea = document.getElementById('sheetPeek');
+
+  peekArea.addEventListener('click', () => {
+    if (sheetState === 'peek') setSheetState('half');
+    else if (sheetState === 'half') setSheetState('full');
+    else setSheetState('peek');
+  });
+
+  sheet.addEventListener('touchstart', (e) => {
+    touchStartY = e.touches[0].clientY;
+  });
+
+  sheet.addEventListener('touchmove', (e) => {
+    touchCurrentY = e.touches[0].clientY;
+  });
+
+  sheet.addEventListener('touchend', () => {
+    const delta = touchStartY - touchCurrentY;
+    if (Math.abs(delta) < 30) return;
+    if (delta > 0) {
+      if (sheetState === 'peek') setSheetState('half');
+      else if (sheetState === 'half') setSheetState('full');
+    } else {
+      if (sheetState === 'full') setSheetState('half');
+      else if (sheetState === 'half') setSheetState('peek');
+    }
+  });
+}
+
+function updateSheetToggle(btn) {
+  btn.classList.toggle('on');
+  btn.classList.toggle('off');
+}
+
+function updateBottomSheet() {
+  const filtered = getFilteredData();
+  const open = filtered.filter(d => d.status === 'open').length;
+  const pending = filtered.filter(d => d.status === 'pending').length;
+
+  document.getElementById('sheetTotal').textContent = filtered.length.toLocaleString();
+  document.getElementById('sheetOpen').textContent = open.toLocaleString();
+  document.getElementById('sheetPending').textContent = pending.toLocaleString();
+  document.getElementById('sheetOpenBadge').textContent = open.toLocaleString();
+  document.getElementById('sheetPendingBadge').textContent = pending.toLocaleString();
+  document.getElementById('sheetClosedBadge').textContent = filtered.filter(d => d.status === 'closed').length.toLocaleString();
+  document.getElementById('sheetPeekSub').textContent = `${filtered.length.toLocaleString()} cases · Swipe up for details`;
+
+  // Sync category filter
+  const sel = document.getElementById('sheetCategoryFilter');
+  const mainSel = document.getElementById('categoryFilter');
+  if (sel.options.length <= 1 && mainSel.options.length > 1) {
+    sel.innerHTML = mainSel.innerHTML;
+  }
+}
+
+// Hook into applyFilters
+const _origApplyFilters = applyFilters;
+applyFilters = function() {
+  _origApplyFilters();
+  if (document.getElementById('bottomSheet')) updateBottomSheet();
+};
+
+fetchData();
+</script>
+</body>
+</html>
