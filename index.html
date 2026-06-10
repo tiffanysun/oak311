@@ -713,7 +713,8 @@
       <h3>Map Key</h3>
       <div class="sheet-key-item"><span>🐳</span> 5 newest open requests</div>
       <div class="sheet-key-item"><span>⭐</span> 5 newest pending</div>
-      <div class="sheet-key-item"><span>⏳</span> 5 oldest open/pending</div>
+      <div class="sheet-key-item"><span>⏳</span> 5 oldest pending</div>
+      <div class="sheet-key-item"><span style="color:#f5a3a0">●</span> Pending 28+ days</div>
     </div>
   </div>
 </div>
@@ -739,8 +740,8 @@
       <div class="lbl">Open</div>
     </div>
     <div class="stat-box">
-      <div class="num" id="closedCount" style="color:#8e8e93">--</div>
-      <div class="lbl">Closed</div>
+      <div class="num" id="pendingCount" style="color:#ff9f0a">--</div>
+      <div class="lbl">Pending</div>
     </div>
   </div>
 
@@ -762,11 +763,11 @@
       <span class="legend-count" id="pendingBadge">0</span>
       <button class="legend-toggle on" id="tog-pending"></button>
     </div>
-    <div class="legend-item" onclick="toggleStatus('closed')">
-      <div class="legend-dot" style="background:#8e8e93"></div>
-      <span class="legend-label">Closed</span>
-      <span class="legend-count" id="closedBadge">0</span>
-      <button class="legend-toggle off" id="tog-closed"></button>
+    <div class="legend-item" onclick="toggleStatus('pendingOld')">
+      <div class="legend-dot" style="background:#f5a3a0"></div>
+      <span class="legend-label">Pending 25+ days</span>
+      <span class="legend-count" id="pendingOldBadge">0</span>
+      <button class="legend-toggle on" id="tog-pendingOld"></button>
     </div>
   </div>
 
@@ -805,9 +806,8 @@
     <h3>Map Key</h3>
     <div class="key-item"><span class="key-icon">🐳</span> 5 newest open requests</div>
     <div class="key-item"><span class="key-icon">⭐</span> 5 newest pending</div>
-    <div class="key-item"><span class="key-icon">⏳</span> 5 oldest open/pending</div>
+    <div class="key-item"><span class="key-icon">⏳</span> 5 oldest pending</div>
   </div>
-</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
@@ -823,7 +823,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 }).addTo(map);
 
 let allData = [];
-let statusVisible = { open: true, pending: true, closed: false };
+let statusVisible = { open: true, pending: true, pendingOld: true, closed: false };
 let displayMode = 'points';
 let heatLayers = {};
 let pointLayers = {};
@@ -889,19 +889,11 @@ async function fetchData() {
 
     loadingText.textContent = 'Loading open & pending requests...';
     const openStatuses = "('OPEN','PENDING','WAITING ON CUSTOMER','REFERRED','WOCREATE','UNFUNDED')";
-    const openUrl = `${baseUrl}?$limit=5000&$select=${selectFields}&$where=${geoFilter} AND status in ${openStatuses}&$order=datetimeinit DESC`;
+    const openUrl = `${baseUrl}?$limit=10000&$select=${selectFields}&$where=${geoFilter} AND status in ${openStatuses}&$order=datetimeinit DESC`;
     const openResp = await fetch(openUrl);
     if (!openResp.ok) throw new Error(`API returned ${openResp.status}`);
     const openRows = await openResp.json();
     processRows(openRows);
-
-    loadingText.textContent = 'Loading recent closed requests...';
-    const closedStatuses = "('CLOSED','CANCEL','GONE ON ARRIVAL','EVALUATED - NO FURTHER ACTION','REQUEST COMPLETE')";
-    const closedUrl = `${baseUrl}?$limit=5000&$select=${selectFields}&$where=${geoFilter} AND status in ${closedStatuses}&$order=datetimeinit DESC`;
-    const closedResp = await fetch(closedUrl);
-    if (!closedResp.ok) throw new Error(`API returned ${closedResp.status}`);
-    const closedRows = await closedResp.json();
-    processRows(closedRows);
 
     loadingText.textContent = `Processing ${allData.length.toLocaleString()} records...`;
 
@@ -967,10 +959,13 @@ function updateStats() {
 
   document.getElementById('totalCount').textContent = filtered.length.toLocaleString();
   document.getElementById('openCount').textContent = open.toLocaleString();
-  document.getElementById('closedCount').textContent = closed.toLocaleString();
+  document.getElementById('pendingCount').textContent = pending.toLocaleString();
   document.getElementById('openBadge').textContent = open.toLocaleString();
   document.getElementById('pendingBadge').textContent = pending.toLocaleString();
-  document.getElementById('closedBadge').textContent = closed.toLocaleString();
+
+  const now25badge = Date.now() - (25 * 86400000);
+  const pendingOldCount = filtered.filter(d => d.status === 'pending' && d.date && new Date(d.date).getTime() < now25badge).length;
+  document.getElementById('pendingOldBadge').textContent = pendingOldCount.toLocaleString();
 
   const now = Date.now();
   const openPending = filtered.filter(d => d.status !== 'closed' && d.date);
@@ -1026,15 +1021,35 @@ function applyFilters() {
   filtered.forEach(d => grouped[d.status].push(d));
 
   if (displayMode === 'heat') {
-    Object.keys(grouped).forEach(status => {
-      if (!statusVisible[status]) return;
-      const points = grouped[status].map(d => [d.lat, d.lng, 0.7]);
+    // Split pending into recent vs 25+ days for separate heat layers
+    const now25heat = Date.now() - (25 * 86400000);
+    const pendingRecent = grouped.pending.filter(d => !d.date || new Date(d.date).getTime() >= now25heat);
+    const pendingOld = grouped.pending.filter(d => d.date && new Date(d.date).getTime() < now25heat);
+
+    const heatGroups = {
+      open: grouped.open,
+      pending: pendingRecent,
+      pendingOld: pendingOld,
+      closed: grouped.closed
+    };
+
+    const heatGradients = {
+      open: STATUS_COLORS.open.heat,
+      pending: STATUS_COLORS.pending.heat,
+      pendingOld: { 0.4: '#fde0df', 0.65: '#f5a3a0', 1: '#e07572' },
+      closed: STATUS_COLORS.closed.heat
+    };
+
+    Object.keys(heatGroups).forEach(key => {
+      const visKey = key === 'pendingOld' ? 'pendingOld' : key;
+      if (!statusVisible[visKey]) return;
+      const points = heatGroups[key].map(d => [d.lat, d.lng, 0.7]);
       if (points.length === 0) return;
-      heatLayers[status] = L.heatLayer(points, {
+      heatLayers[key] = L.heatLayer(points, {
         radius: currentRadius,
         blur: 15,
         maxZoom: 17,
-        gradient: STATUS_COLORS[status].heat,
+        gradient: heatGradients[key],
         minOpacity: currentOpacity * 0.3,
         max: 1.0
       }).addTo(map);
@@ -1060,29 +1075,43 @@ function applyFilters() {
       if (!isNewest && !isOldest && !isNewestOpen) return;
 
       let marker;
+      let dotColor;
       if (isNewestOpen) {
+        dotColor = '#34c759';
         marker = L.marker([d.lat, d.lng], {
-          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill newest-open"><span class="marker-emoji">🐳</span><span class="marker-label">Newest Open</span></div>', iconSize: [70, 44], iconAnchor: [35, 44] }),
+          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill newest-open"><span class="marker-emoji">🐳</span><span class="marker-label">Newest Open</span></div>', iconSize: [0, 0], iconAnchor: [0, 44] }),
           zIndexOffset: 900
         });
       } else if (isNewest) {
+        dotColor = '#ffd700';
         marker = L.marker([d.lat, d.lng], {
-          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill newest"><span class="marker-emoji">⭐</span><span class="marker-label">New</span></div>', iconSize: [70, 44], iconAnchor: [35, 44] }),
+          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill newest"><span class="marker-emoji">⭐</span><span class="marker-label">New</span></div>', iconSize: [0, 0], iconAnchor: [0, 44] }),
           zIndexOffset: 1000
         });
       } else {
+        dotColor = '#f5a3a0';
         marker = L.marker([d.lat, d.lng], {
-          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill oldest"><span class="marker-emoji">⏳</span><span class="marker-label">Pending</span></div>', iconSize: [70, 44], iconAnchor: [35, 44] }),
+          icon: L.divIcon({ className: 'special-marker', html: '<div class="marker-pill oldest"><span class="marker-emoji">⏳</span><span class="marker-label">Pending</span></div>', iconSize: [0, 0], iconAnchor: [0, 44] }),
           zIndexOffset: 1000
         });
       }
+
+      // Add colored dot at the location
+      const dot = L.circleMarker([d.lat, d.lng], {
+        radius: 7,
+        fillColor: dotColor,
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 0.9
+      });
+      specialLayer.addLayer(dot);
 
       const dateStr = d.date ? new Date(d.date).toLocaleDateString() : '';
       const statusColor = d.status === 'open' ? '#34c759' : d.status === 'pending' ? '#ff9f0a' : '#8e8e93';
       const age = (d.status !== 'closed' && d.date) ? ageLabel(d.date) : '';
       const badge = isNewestOpen ? '<span style="color:#bf5af2;font-weight:700"> 🐳 NEWEST OPEN</span>' :
                     isNewest ? '<span style="color:#007aff;font-weight:700"> ⭐ NEWEST</span>' :
-                    '<span style="color:#ff9f0a;font-weight:700"> ⏳ OLDEST</span>';
+                    '<span style="color:#e07572;font-weight:700"> ⏳ OLDEST</span>';
       marker.bindPopup(`
         <div class="popup-content">
           <strong>${d.category}</strong>${badge}<br>
@@ -1137,6 +1166,12 @@ function applyFilters() {
     const newest5 = new Set(openPending.slice(-5).map(d => d.id));
     const newestOpen5 = new Set(openOnly.slice(-5).map(d => d.id));
 
+    // Pending cases older than 25 days — color red
+    const now25 = Date.now() - (25 * 86400000);
+    const oldPending28 = new Set(
+      grouped.pending.filter(d => d.date && new Date(d.date).getTime() < now25).map(d => d.id)
+    );
+
     Object.keys(grouped).forEach(status => {
       if (!statusVisible[status]) return;
       const markers = L.layerGroup();
@@ -1145,8 +1180,10 @@ function applyFilters() {
         const isNewest = newest5.has(d.id);
         const isOldest = oldest5.has(d.id);
         const isNewestOpen = newestOpen5.has(d.id) && !isNewest;
+        const isOldPending = oldPending28.has(d.id) && !isOldest;
 
         if (isNewestOpen) {
+          markers.addLayer(L.circleMarker([d.lat, d.lng], { radius: 7, fillColor: '#34c759', color: '#fff', weight: 2, fillOpacity: 0.9 }));
           marker = L.marker([d.lat, d.lng], {
             icon: L.divIcon({
               className: 'special-marker',
@@ -1156,6 +1193,7 @@ function applyFilters() {
             zIndexOffset: 900
           });
         } else if (isNewest) {
+          markers.addLayer(L.circleMarker([d.lat, d.lng], { radius: 7, fillColor: '#ffd700', color: '#fff', weight: 2, fillOpacity: 0.9 }));
           marker = L.marker([d.lat, d.lng], {
             icon: L.divIcon({
               className: 'special-marker',
@@ -1165,6 +1203,7 @@ function applyFilters() {
             zIndexOffset: 1000
           });
         } else if (isOldest) {
+          markers.addLayer(L.circleMarker([d.lat, d.lng], { radius: 7, fillColor: '#f5a3a0', color: '#fff', weight: 2, fillOpacity: 0.9 }));
           marker = L.marker([d.lat, d.lng], {
             icon: L.divIcon({
               className: 'special-marker',
@@ -1173,6 +1212,26 @@ function applyFilters() {
             }),
             zIndexOffset: 1000
           });
+        } else if (isOldPending) {
+          if (!statusVisible.pendingOld) {
+            marker = L.circleMarker([d.lat, d.lng], {
+              radius: 6,
+              fillColor: STATUS_COLORS[status].point,
+              color: STATUS_COLORS[status].border,
+              weight: 1.5,
+              fillOpacity: 0.55,
+              opacity: 0.7
+            });
+          } else {
+            marker = L.circleMarker([d.lat, d.lng], {
+              radius: 6,
+              fillColor: '#f5a3a0',
+              color: '#e07572',
+              weight: 1.5,
+              fillOpacity: 0.6,
+              opacity: 0.7
+            });
+          }
         } else {
           marker = L.circleMarker([d.lat, d.lng], {
             radius: 6,
@@ -1185,11 +1244,12 @@ function applyFilters() {
         }
 
         const dateStr = d.date ? new Date(d.date).toLocaleDateString() : '';
-        const statusColor = status === 'open' ? '#34c759' : status === 'pending' ? '#ff9f0a' : '#8e8e93';
+        const statusColor = isOldPending ? '#f5a3a0' : (status === 'open' ? '#34c759' : status === 'pending' ? '#ff9f0a' : '#8e8e93');
         const age = (status !== 'closed' && d.date) ? ageLabel(d.date) : '';
-        const badge = isNewestOpen ? '<span style="color:#bf5af2;font-weight:700"> 🐳 NEWEST OPEN</span>' :
+        const badge = isOldPending ? '<span style="color:#e07572;font-weight:700"> 🔴 PENDING 25+ DAYS</span>' :
+                      isNewestOpen ? '<span style="color:#bf5af2;font-weight:700"> 🐳 NEWEST OPEN</span>' :
                       isNewest ? '<span style="color:#007aff;font-weight:700"> ⭐ NEWEST</span>' :
-                      isOldest ? '<span style="color:#ff9f0a;font-weight:700"> ⏳ OLDEST</span>' : '';
+                      isOldest ? '<span style="color:#e07572;font-weight:700"> ⏳ OLDEST</span>' : '';
         marker.bindPopup(`
           <div class="popup-content">
             <strong>${d.category}</strong>${badge}<br>
